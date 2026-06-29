@@ -2,11 +2,13 @@ package com.wife.app;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.net.MacAddress;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
 import android.net.wifi.p2p.WifiP2pDeviceList;
 import android.net.wifi.p2p.WifiP2pInfo;
 import android.net.wifi.p2p.WifiP2pManager;
+import android.os.Build;
 import android.os.Looper;
 import android.util.Log;
 
@@ -132,14 +134,31 @@ public class WiFiDirectManager {
     @SuppressLint("MissingPermission")
     public void connect(final WifiP2pDevice device, final WifiP2pManager.ActionListener listener) {
         if (p2pManager == null || channel == null || device == null) return;
-        WifiP2pConfig config = new WifiP2pConfig();
-        config.deviceAddress = device.deviceAddress;
-        p2pManager.connect(channel, config, listener);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                MacAddress mac = MacAddress.fromString(device.deviceAddress);
+                WifiP2pConfig config = new WifiP2pConfig.Builder()
+                        .setDeviceAddress(mac)
+                        .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_5GHZ)
+                        .build();
+                WifeLogger.log(TAG, "Forcing connection profile to prefer 5 GHz band for device: " + device.deviceName);
+                p2pManager.connect(channel, config, listener);
+            } catch (Exception e) {
+                WifeLogger.log(TAG, "MacAddress builder parsing failed. Reverting to legacy connect profile. Error: " + e.getMessage());
+                WifiP2pConfig config = new WifiP2pConfig();
+                config.deviceAddress = device.deviceAddress;
+                p2pManager.connect(channel, config, listener);
+            }
+        } else {
+            WifiP2pConfig config = new WifiP2pConfig();
+            config.deviceAddress = device.deviceAddress;
+            p2pManager.connect(channel, config, listener);
+        }
     }
 
     public void disconnect(final WifiP2pManager.ActionListener listener) {
         if (p2pManager == null || channel == null) return;
-        // Wrap listener to immediately update connection info and clear local peers on success
         p2pManager.removeGroup(channel, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
@@ -160,7 +179,16 @@ public class WiFiDirectManager {
 
     public void createGroup(final WifiP2pManager.ActionListener listener) {
         if (p2pManager == null || channel == null) return;
-        p2pManager.createGroup(channel, listener);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiP2pConfig config = new WifiP2pConfig.Builder()
+                    .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_5GHZ)
+                    .build();
+            WifeLogger.log(TAG, "Initiating 5 GHz band Autonomous P2P Group pre-creation.");
+            p2pManager.createGroup(channel, config, listener);
+        } else {
+            p2pManager.createGroup(channel, listener);
+        }
     }
 
     public void updatePeers(WifiP2pDeviceList deviceList) {
@@ -175,7 +203,6 @@ public class WiFiDirectManager {
 
     public void updateConnectionInfo(WifiP2pInfo info) {
         this.connectionInfo = info;
-        // Symmetrical State Clear: Wipe local cached peers list on link disconnection
         if (info == null || !info.groupFormed) {
             peersList.clear();
             for (PeerChangeListener listener : peerListeners) {
