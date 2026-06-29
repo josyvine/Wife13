@@ -262,6 +262,7 @@ public class FileReceiver implements Runnable {
             final String filename = meta.get("name").getAsString();
             final long originalSize = meta.get("size").getAsLong();
             final long compressedSize = meta.get("compressedSize").getAsLong();
+            final boolean compress = meta.has("compressed") ? meta.get("compressed").getAsBoolean() : true;
             long resumePosition = meta.has("lastPosition") ? meta.get("lastPosition").getAsLong() : 0;
             
             String transferType = meta.has("type") ? meta.get("type").getAsString() : "file";
@@ -345,81 +346,94 @@ public class FileReceiver implements Runnable {
 
             } else {
                 File fileDest = new File(targetDir, filename);
-                File tempCompressedFile = new File(backupDir, "temp_recv_" + System.currentTimeMillis() + "_" + filename + ".lz4");
+                File tempCompressedFile = null;
+                BufferedOutputStream bos = null;
+
+                // Open write endpoint directly on target location if file is uncompressed
+                if (compress) {
+                    tempCompressedFile = new File(backupDir, "temp_recv_" + System.currentTimeMillis() + "_" + filename + ".lz4");
+                    bos = new BufferedOutputStream(new FileOutputStream(tempCompressedFile, resumePosition > 0), 128 * 1024);
+                    WifeLogger.log(TAG, "Receiving compressed stream. Temporary target: " + tempCompressedFile.getAbsolutePath());
+                } else {
+                    bos = new BufferedOutputStream(new FileOutputStream(fileDest, resumePosition > 0), 128 * 1024);
+                    WifeLogger.log(TAG, "Receiving raw stream. Direct target destination: " + fileDest.getAbsolutePath());
+                }
 
                 try {
-                    try (FileOutputStream fos = new FileOutputStream(tempCompressedFile, resumePosition > 0);
-                         BufferedOutputStream bos = new BufferedOutputStream(fos, 128 * 1024)) {
-                        byte[] buffer = new byte[65536]; // Increased from 16KB to 64KB for high-speed reception
-                        long totalBytesRead = resumePosition;
-                        long lastNotificationUpdateTime = System.currentTimeMillis();
-                        long speedPeriodBytesRead = 0;
-                        long speedPeriodStartTime = System.currentTimeMillis();
-                        double currentSpeed = 0.0;
+                    byte[] buffer = new byte[65536]; // Increased from 16KB to 64KB for high-speed reception
+                    long totalBytesRead = resumePosition;
+                    long lastNotificationUpdateTime = System.currentTimeMillis();
+                    long speedPeriodBytesRead = 0;
+                    long speedPeriodStartTime = System.currentTimeMillis();
+                    double currentSpeed = 0.0;
 
-                        while (totalBytesRead < compressedSize && !FileTransferForegroundService.isCancelled) {
-                            synchronized (FileTransferForegroundService.pauseLock) {
-                                while (FileTransferForegroundService.isPaused && !FileTransferForegroundService.isCancelled) {
-                                    try {
-                                        FileTransferForegroundService.pauseLock.wait();
-                                    } catch (InterruptedException ignored) {}
-                                }
-                            }
-
-                            if (FileTransferForegroundService.isCancelled) {
-                                break;
-                            }
-
-                            int bytesToRead = (int) Math.min(buffer.length, compressedSize - totalBytesRead);
-                            int read = proxyIn.read(buffer, 0, bytesToRead);
-                            if (read == -1) {
-                                throw new IOException("Connection severed abruptly during raw payload transfer.");
-                            }
-
-                            bos.write(buffer, 0, read);
-                            totalBytesRead += read;
-                            speedPeriodBytesRead += read;
-
-                            long currentTime = System.currentTimeMillis();
-                            long timeDiff = currentTime - speedPeriodStartTime;
-                            if (timeDiff >= 1000) {
-                                // FIXED: Resolved compile failure by targeting speedPeriodBytesRead instead of speedPeriodBytesSent
-                                currentSpeed = ((double) speedPeriodBytesRead / (1024.0 * 1024.0)) / ((double) timeDiff / 1000.0);
-                                speedPeriodBytesRead = 0;
-                                speedPeriodStartTime = currentTime;
-                            }
-
-                            if (currentTime - lastNotificationUpdateTime >= 1000) {
-                                int percent = (int) ((totalBytesRead * 100) / compressedSize);
-                                notifyProgress(context, filename, percent, totalBytesRead, compressedSize, fileIndex, currentSpeed);
-                                lastNotificationUpdateTime = currentTime;
+                    while (totalBytesRead < compressedSize && !FileTransferForegroundService.isCancelled) {
+                        synchronized (FileTransferForegroundService.pauseLock) {
+                            while (FileTransferForegroundService.isPaused && !FileTransferForegroundService.isCancelled) {
+                                try {
+                                    FileTransferForegroundService.pauseLock.wait();
+                                } catch (InterruptedException ignored) {}
                             }
                         }
-                        bos.flush();
-                    }
 
-                    if (!FileTransferForegroundService.isCancelled) {
+                        if (FileTransferForegroundService.isCancelled) {
+                            break;
+                        }
+
+                        int bytesToRead = (int) Math.min(buffer.length, compressedSize - totalBytesRead);
+                        int read = proxyIn.read(buffer, 0, bytesToRead);
+                        if (read == -1) {
+                            throw new IOException("Connection severed abruptly during raw payload transfer.");
+                        }
+
+                        bos.write(buffer, 0, read);
+                        totalBytesRead += read;
+                        speedPeriodBytesRead += read;
+
+                        long currentTime = System.currentTimeMillis();
+                        long timeDiff = currentTime - speedPeriodStartTime;
+                        if (timeDiff >= 1000) {
+                            currentSpeed = ((double) speedPeriodBytesRead / (1024.0 * 1024.0)) / ((double) timeDiff / 1000.0);
+                            speedPeriodBytesRead = 0;
+                            speedPeriodStartTime = currentTime;
+                        }
+
+                        if (currentTime - lastNotificationUpdateTime >= 1000) {
+                            int percent = (int) ((totalBytesRead * 100) / compressedSize);
+                            notifyProgress(context, filename, percent, totalBytesRead, compressedSize, fileIndex, currentSpeed);
+                            lastNotificationUpdateTime = currentTime;
+                        }
+                    }
+                    bos.flush();
+                } finally {
+                    if (bos != null) {
+                        try { bos.close(); } catch (Exception ignored) {}
+                    }
+                }
+
+                if (!FileTransferForegroundService.isCancelled) {
+                    if (compress) {
                         WifeLogger.log(TAG, "Compressed payload received. Decompressing file locally: " + fileDest.getAbsolutePath());
 
                         try (FileInputStream fis = new FileInputStream(tempCompressedFile);
                              BufferedInputStream bis = new BufferedInputStream(fis, 128 * 1024);
                              FileOutputStream fos = new FileOutputStream(fileDest);
-                             BufferedOutputStream bos = new BufferedOutputStream(fos, 128 * 1024)) {
-                            CompressionUtils.decompress(bis, bos);
+                             BufferedOutputStream bosOut = new BufferedOutputStream(fos, 128 * 1024)) {
+                            CompressionUtils.decompress(bis, bosOut);
+                        } finally {
+                            if (tempCompressedFile.exists()) {
+                                tempCompressedFile.delete();
+                            }
                         }
-
-                        WifeLogger.log(TAG, "File successfully decrypted and saved: " + fileDest.getAbsolutePath());
-
-                        FileEntity entity = new FileEntity(filename, originalSize, fileDest.getAbsolutePath(), System.currentTimeMillis());
-                        RoomDatabaseManager.getInstance(context).fileDao().insert(entity);
-
-                        notifyComplete(context, filename, fileDest.getAbsolutePath(), fileIndex);
-                        fileIndex++;
                     }
-                } finally {
-                    if (tempCompressedFile.exists()) {
-                        tempCompressedFile.delete();
-                    }
+
+                    WifeLogger.log(TAG, "File successfully received and saved: " + fileDest.getAbsolutePath());
+
+                    FileEntity entity = new FileEntity(filename, originalSize, fileDest.getAbsolutePath(), System.currentTimeMillis());
+                    RoomDatabaseManager.getInstance(context).fileDao().insert(entity);
+
+                    notifyComplete(context, filename, fileDest.getAbsolutePath(), fileIndex);
+                    fileIndex++;
                 }
             }
         }
