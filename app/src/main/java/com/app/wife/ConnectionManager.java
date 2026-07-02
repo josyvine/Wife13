@@ -88,7 +88,7 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
     public synchronized void setPeerDeviceId(String peerDeviceId) {
         WifeLogger.log(TAG, "setPeerDeviceId called. Tracking peer ID: " + peerDeviceId);
         this.peerDeviceId = peerDeviceId;
-        
+
         // For a multi-client group calling host, register this mapped identity to our group peers directory
         if (isHost && peerIpAddress != null && !peerIpAddress.isEmpty()) {
             addGroupPeer(peerDeviceId, peerIpAddress);
@@ -110,7 +110,7 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
             }
             groupPeers.put(deviceId, ipAddress);
             WifeLogger.log(TAG, "addGroupPeer: Tracked " + deviceId + " at IP: " + ipAddress + " | Group Size: " + groupPeers.size());
-            
+
             // Sync current active mesh directory with all connected nodes
             triggerRosterSyncBroadcast();
         }
@@ -121,7 +121,7 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
         if (deviceId != null) {
             groupPeers.remove(deviceId);
             WifeLogger.log(TAG, "removeGroupPeer: Untracked " + deviceId + " | Group Size: " + groupPeers.size());
-            
+
             // Sync current active mesh directory with all connected nodes
             triggerRosterSyncBroadcast();
         }
@@ -147,7 +147,7 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
             WifeLogger.log(TAG, "Triggering mesh roster synchronization broadcast.");
             java.util.Map<String, String> syncMap = new java.util.HashMap<>(groupPeers);
             syncMap.put(Utils.getDeviceId(context), "192.168.49.1"); // Inject Host device configuration into list
-            
+
             CallSignalingManager.getInstance(context).broadcastRosterSync(
                 new ArrayList<>(groupPeers.values()),
                 syncMap
@@ -165,11 +165,11 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
             if (!isConnected) {
                 isConnected = true;
                 isHost = info.isGroupOwner;
-                
+
                 // Critical Fix: BOTH Host and Client must start background socket servers
                 // to listen for incoming bidirectional message and calling requests.
                 startServers();
-                
+
                 if (isHost) {
                     Log.d(TAG, "Device is Group Owner. Starting SocketServers...");
                     WifeLogger.log(TAG, "P2P connection established. This device is the Group Owner (Host). Server sockets started.");
@@ -201,6 +201,10 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
         // Start the persistent NIO file receiver on port 8900
         WifeLogger.log(TAG, "startServers() invoking persistent high-speed FileReceiver.startServer.");
         FileReceiver.startServer(context);
+
+        // Start the persistent group file receiver on port 8905
+        WifeLogger.log(TAG, "startServers() invoking persistent high-speed GroupFileReceiver.startServer.");
+        GroupFileReceiver.startServer(context);
     }
 
     private synchronized void startClient(InetAddress hostAddress) {
@@ -220,7 +224,7 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
             this.peerIpAddress = acceptedIp;
             notifyStateChanged();
         }
-        
+
         // Symmetrical mapping: In a multi-client AGO group, we dynamically register 
         // every accepted Client IP into our Group Peers map so GroupCallManager can target them
         if (isHost && acceptedIp != null && !acceptedIp.isEmpty()) {
@@ -253,7 +257,7 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
 
     public synchronized void teardown() {
         WifeLogger.log(TAG, "teardown() invoked. Cleared connection state variables.");
-        
+
         // Cancel any pending scheduled teardowns to avoid double execution
         if (pendingTeardownRunnable != null) {
             mainHandler.removeCallbacks(pendingTeardownRunnable);
@@ -271,7 +275,13 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
         synchronized (FileTransferForegroundService.pauseLock) {
             FileTransferForegroundService.pauseLock.notifyAll();
         }
-        
+
+        // Stop any running group file transfer activities/servers cleanly
+        GroupFileTransferForegroundService.isCancelled = true;
+        synchronized (GroupFileTransferForegroundService.pauseLock) {
+            GroupFileTransferForegroundService.pauseLock.notifyAll();
+        }
+
         if (socketServer != null) {
             socketServer.stop();
             socketServer = null;
