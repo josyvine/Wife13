@@ -83,6 +83,10 @@
         <activity android:name=".VoiceCallActivity" android:exported="false" />
         <activity android:name=".VideoCallActivity" android:exported="false" />
         <activity android:name=".FileTransferActivity" android:exported="false" />
+        
+        <!-- Decoupled targeted multi-device group file sharing activity -->
+        <activity android:name=".GroupFileTransferActivity" android:exported="false" />
+        
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".CallHistoryActivity" android:exported="false" />
         <activity android:name=".ConnectionStatusActivity" android:exported="false" />
@@ -122,6 +126,12 @@
             
         <service 
             android:name=".FileTransferForegroundService" 
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <!-- Decoupled Foreground Service for parallel multi-device group file sharing -->
+        <service 
+            android:name=".GroupFileTransferForegroundService" 
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
