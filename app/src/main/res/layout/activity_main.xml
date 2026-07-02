@@ -544,6 +544,35 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
+        <!-- Additive Drawer Item: Multi-Device Group File Sharing -->
+        <LinearLayout
+            android:id="@+id/btnMenuGroupFileShare"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:layout_marginBottom="12dp"
+            android:paddingHorizontal="8dp">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/mobile_share_stack_24px"
+                app:tint="@color/editorial_accent"
+                android:layout_marginEnd="16dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Group File Sharing"
+                android:textSize="14sp"
+                android:textColor="@color/editorial_primary_dark"
+                android:textStyle="bold" />
+        </LinearLayout>
+
         <!-- Drawer Item: Settings -->
         <LinearLayout
             android:id="@+id/btnMenuSettings"
