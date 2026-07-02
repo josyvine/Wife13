@@ -73,7 +73,8 @@ public class GroupFileTransferActivity extends AppCompatActivity implements
                         // Locate or dynamically inflate progress trackers for this specific target IP
                         View progressRow = activePeerProgressViews.get(peerIp);
                         if (progressRow == null) {
-                            progressRow = getLayoutInflater().inflate(R.xml.item_group_progress, binding.containerActivePeersProgress, false);
+                            // Fixed: Changed from R.xml to R.layout to resolve compiler error
+                            progressRow = getLayoutInflater().inflate(R.layout.item_group_progress, binding.containerActivePeersProgress, false);
                             binding.containerActivePeersProgress.addView(progressRow);
                             activePeerProgressViews.put(peerIp, progressRow);
                         }
