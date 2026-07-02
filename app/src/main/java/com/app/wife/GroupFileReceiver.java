@@ -124,7 +124,7 @@ public class GroupFileReceiver {
     /**
      * Processes metadata headers and LZ4 decompression segments sequentially over the active Group SocketChannel.
      */
-    private static void processPersistentStream(Context context, SocketChannel socketChannel) throws Exception {
+    private static void processGroupPersistentStream(Context context, SocketChannel socketChannel) throws Exception {
         GroupFileTransferForegroundService.isCancelled = false;
         GroupFileTransferForegroundService.isPaused = false;
 
@@ -210,7 +210,7 @@ public class GroupFileReceiver {
             }
 
             String metaJson = new String(metaBytes, StandardCharsets.UTF_8);
-            JsonObject meta = com.google.gson.JsonParser.parseString(metaJson).getAsJsonObject();
+            JsonObject meta = JsonParser.parseString(metaJson).getAsJsonObject();
 
             final String filename = meta.get("name").getAsString();
             final long originalSize = meta.get("size").getAsLong();
@@ -240,7 +240,7 @@ public class GroupFileReceiver {
                 byte[] buffer = new byte[65536]; // Optimized 64KB block buffer for high-speed reception
                 long totalBytesRead = resumePosition;
                 long lastNotificationUpdateTime = System.currentTimeMillis();
-                long speedPeriodBytesRead = 0;
+                long speedPeriodBytesSent = 0; // Fixed spelling initialization mismatch
                 long speedPeriodStartTime = System.currentTimeMillis();
                 double currentSpeed = 0.0;
 
@@ -392,8 +392,8 @@ public class GroupFileReceiver {
             lastBroadcastTimes.put(filename, now);
 
             new Handler(Looper.getMainLooper()).post(() -> {
-                synchronized (FileReceiver.class) {
-                    for (FileReceiveListener l : listeners) {
+                synchronized (GroupFileReceiver.class) {
+                    for (GroupFileReceiveListener l : listeners) {
                         l.onProgress(filename, percent);
                     }
                 }
@@ -419,8 +419,8 @@ public class GroupFileReceiver {
 
     private static void notifyComplete(Context context, final String filename, final String path, int fileIndex) {
         new Handler(Looper.getMainLooper()).post(() -> {
-            synchronized (FileReceiver.class) {
-                for (FileReceiveListener l : listeners) {
+            synchronized (GroupFileReceiver.class) {
+                for (GroupFileReceiveListener l : listeners) {
                     l.onComplete(filename, path);
                 }
             }
@@ -440,15 +440,23 @@ public class GroupFileReceiver {
     }
 
     private static void broadcastError(Context context, String message) {
+        broadcastError(context, message, null);
+    }
+
+    // Overloaded to support specific sender IP address mapping
+    private static void broadcastError(Context context, String message, String peerIp) {
         Intent intent = new Intent(Constants.ACTION_GROUP_TRANSFER_ERROR);
         intent.putExtra(Constants.EXTRA_ERROR_MESSAGE, message);
+        if (peerIp != null) {
+            intent.putExtra(Constants.EXTRA_PEER_IP, peerIp);
+        }
         LocalBroadcastManager.getInstance(context).sendBroadcast(intent);
     }
 
     private static void notifyError(final String error) {
         new Handler(Looper.getMainLooper()).post(() -> {
-            synchronized (FileReceiver.class) {
-                for (FileReceiveListener l : listeners) {
+            synchronized (GroupFileReceiver.class) {
+                for (GroupFileReceiveListener l : listeners) {
                     l.onError(error);
                 }
             }
