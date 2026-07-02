@@ -5,7 +5,9 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.reflect.TypeToken;
 
 import java.io.OutputStream;
 import java.io.PrintWriter;
@@ -144,10 +146,63 @@ public class CallSignalingManager {
         }
     }
 
+    // Parallel mesh roster synchronization broadcaster helper for targeted transfers
+    public void broadcastRosterSync(final List<String> peerIps, final java.util.Map<String, String> syncMap) {
+        if (peerIps == null || peerIps.isEmpty() || syncMap == null) return;
+        WifeLogger.log(TAG, "broadcastRosterSync() invoked. Target IP count: " + peerIps.size());
+        executorService.execute(() -> {
+            try {
+                Gson gson = new Gson();
+                String rosterJson = gson.toJson(syncMap);
+                for (String ip : peerIps) {
+                    try (Socket socket = new Socket(ip, Constants.OFF_PORT_CONTROL);
+                         OutputStream os = socket.getOutputStream();
+                         PrintWriter pw = new PrintWriter(os, true)) {
+
+                        JsonObject json = new JsonObject();
+                        json.addProperty("type", Constants.SIGNAL_PEER_ROSTER_SYNC);
+                        json.addProperty("sender", Utils.getDeviceId(context));
+                        json.addProperty("roster", rosterJson);
+
+                        String payload = json.toString();
+                        pw.println(payload);
+                        pw.flush();
+                        Log.d(TAG, "Sent roster sync packet to: " + ip);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed sending roster sync to " + ip + ": " + e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                WifeLogger.log(TAG, "Error executing roster sync broadcast task: " + e.getMessage(), e);
+            }
+        });
+    }
+
     public void handleReceivedSignal(String action, JsonObject payload, String peerIp) {
         Log.d(TAG, "Handling received signal: " + action + " from peer " + peerIp);
         WifeLogger.log(TAG, "handleReceivedSignal() invoked. Action: " + action + " | Peer IP: " + peerIp);
         
+        // Handle roster sync signal in background before routing to active UI call screens
+        if (Constants.SIGNAL_PEER_ROSTER_SYNC.equals(action)) {
+            WifeLogger.log(TAG, "Signal matched: PEER_ROSTER_SYNC. Updating ConnectionManager.");
+            try {
+                if (payload != null && payload.has("roster")) {
+                    String rosterJson = payload.get("roster").getAsString();
+                    java.lang.reflect.Type mapType = new TypeToken<java.util.HashMap<String, String>>() {}.getType();
+                    java.util.Map<String, String> receivedMap = new Gson().fromJson(rosterJson, mapType);
+
+                    // Filter out local device to prevent looped messaging back to ourselves
+                    String selfId = Utils.getDeviceId(context);
+                    receivedMap.remove(selfId);
+
+                    ConnectionManager.getInstance(context).syncGroupPeers(receivedMap);
+                }
+            } catch (Exception e) {
+                WifeLogger.log(TAG, "Failed parsing synchronized mesh roster: " + e.getMessage(), e);
+            }
+            return; // Exit signaling flow for group setup sync packets
+        }
+
         // Notify any active call screen UI
         synchronized (this) {
             if (!listeners.isEmpty()) {
