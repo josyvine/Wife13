@@ -135,6 +135,17 @@ public class MainActivity extends AppCompatActivity implements ConnectionManager
             startActivity(new Intent(MainActivity.this, CallHistoryActivity.class));
         });
 
+        // Additive Drawer Item: Multi-Device Group File Sharing
+        binding.btnMenuGroupFileShare.setOnClickListener(v -> {
+            binding.drawerLayout.closeDrawer(GravityCompat.START);
+            if (connectionManager.isConnected()) {
+                WifeLogger.log(TAG, "User launched GroupFileTransferActivity from drawer.");
+                startActivity(new Intent(MainActivity.this, GroupFileTransferActivity.class));
+            } else {
+                Toast.makeText(this, "Please establish a connection to share group files.", Toast.LENGTH_SHORT).show();
+            }
+        });
+
         binding.btnMenuSettings.setOnClickListener(v -> {
             binding.drawerLayout.closeDrawer(GravityCompat.START);
             WifeLogger.log(TAG, "User launched SettingsActivity from drawer.");
