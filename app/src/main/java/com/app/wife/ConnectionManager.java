@@ -110,6 +110,9 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
             }
             groupPeers.put(deviceId, ipAddress);
             WifeLogger.log(TAG, "addGroupPeer: Tracked " + deviceId + " at IP: " + ipAddress + " | Group Size: " + groupPeers.size());
+            
+            // Sync current active mesh directory with all connected nodes
+            triggerRosterSyncBroadcast();
         }
     }
 
@@ -118,12 +121,38 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
         if (deviceId != null) {
             groupPeers.remove(deviceId);
             WifeLogger.log(TAG, "removeGroupPeer: Untracked " + deviceId + " | Group Size: " + groupPeers.size());
+            
+            // Sync current active mesh directory with all connected nodes
+            triggerRosterSyncBroadcast();
         }
     }
 
     // Exposes a thread-safe copy of currently active group peers
     public synchronized java.util.Map<String, String> getGroupPeers() {
         return new java.util.HashMap<>(groupPeers);
+    }
+
+    // Thread-safe roster sync receiver for client nodes
+    public synchronized void syncGroupPeers(java.util.Map<String, String> newPeers) {
+        groupPeers.clear();
+        if (newPeers != null) {
+            groupPeers.putAll(newPeers);
+        }
+        WifeLogger.log(TAG, "syncGroupPeers: Local roster updated. Active Count: " + groupPeers.size());
+    }
+
+    // Helper to package and broadcast Host directory changes to all Client nodes over Port 8888
+    private void triggerRosterSyncBroadcast() {
+        if (isHost) {
+            WifeLogger.log(TAG, "Triggering mesh roster synchronization broadcast.");
+            java.util.Map<String, String> syncMap = new java.util.HashMap<>(groupPeers);
+            syncMap.put(Utils.getDeviceId(context), "192.168.49.1"); // Inject Host device configuration into list
+            
+            CallSignalingManager.getInstance(context).broadcastRosterSync(
+                new ArrayList<>(groupPeers.values()),
+                syncMap
+            );
+        }
     }
 
     @Override
