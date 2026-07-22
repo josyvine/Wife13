@@ -23,6 +23,7 @@ public class HeartbeatManager {
 
     private long lastHeartbeatReceived = 0;
     private boolean isMonitoring = false;
+    private volatile boolean initialGracePeriodActive = true;
 
     public static HeartbeatManager getInstance(Context context) {
         if (instance == null) {
@@ -45,6 +46,7 @@ public class HeartbeatManager {
         if (isMonitoring) return;
         isMonitoring = true;
         lastHeartbeatReceived = System.currentTimeMillis();
+        initialGracePeriodActive = true;
 
         // Dynamically re-create the scheduler if it was previously shut down, closed, or terminated
         if (scheduler == null || scheduler.isShutdown() || scheduler.isTerminated()) {
@@ -61,6 +63,7 @@ public class HeartbeatManager {
 
     public synchronized void stopMonitoring() {
         isMonitoring = false;
+        initialGracePeriodActive = true;
 
         // Cancel the individual running tasks
         if (sendTask != null) {
@@ -103,8 +106,10 @@ public class HeartbeatManager {
         if (!isMonitoring) return;
         
         long diff = System.currentTimeMillis() - lastHeartbeatReceived;
-        if (diff > 15000) { // No heartbeat received for over 15 seconds
-            Log.e(TAG, "Heartbeat timeout! Peer disconnected.");
+        long timeoutLimit = initialGracePeriodActive ? 40000L : 15000L;
+
+        if (diff > timeoutLimit) { // Timeout evaluated dynamically based on connection state
+            Log.e(TAG, "Heartbeat timeout! Peer disconnected. Elapsed: " + diff + "ms (Limit: " + timeoutLimit + "ms)");
             mainHandler.post(() -> {
                 // Terminate connections and trigger auto-reconnection
                 ConnectionManager.getInstance(context).teardown();
@@ -115,6 +120,7 @@ public class HeartbeatManager {
 
     public synchronized void onHeartbeatReceived(String peerIp) {
         lastHeartbeatReceived = System.currentTimeMillis();
+        initialGracePeriodActive = false; // Initial proof of life obtained, strict 15-second watchdog is now active
         Log.d(TAG, "Heartbeat received from " + peerIp);
     }
 }
