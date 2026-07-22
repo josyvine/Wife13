@@ -11,6 +11,7 @@ import com.google.gson.reflect.TypeToken;
 
 import java.io.OutputStream;
 import java.io.PrintWriter;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,7 +43,7 @@ public class CallSignalingManager {
 
     private CallSignalingManager(Context context) {
         this.context = context;
-        this.executorService = Executors.newSingleThreadExecutor();
+        this.executorService = Executors.newCachedThreadPool();
     }
 
     public synchronized void registerListener(SignalingEventListener listener) {
@@ -59,42 +60,43 @@ public class CallSignalingManager {
         WifeLogger.log(TAG, "sendSignal() invoked. Queuing outbound control signal: " + type + " | Target IP: " + peerIp);
         executorService.execute(() -> {
             WifeLogger.log(TAG, "Executing outbound signaling socket task on background worker thread.");
-            try (Socket socket = new Socket(peerIp, Constants.OFF_PORT_CONTROL);
-                 OutputStream os = socket.getOutputStream();
-                 PrintWriter pw = new PrintWriter(os, true)) {
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(peerIp, Constants.OFF_PORT_CONTROL), 3000);
+                try (OutputStream os = socket.getOutputStream();
+                     PrintWriter pw = new PrintWriter(os, true)) {
 
-                WifeLogger.log(TAG, "Signaling socket connected successfully with " + peerIp + " on control Port: " + Constants.OFF_PORT_CONTROL);
+                    WifeLogger.log(TAG, "Signaling socket connected successfully with " + peerIp + " on control Port: " + Constants.OFF_PORT_CONTROL);
 
-                SharedPreferences prefs = context.getSharedPreferences("WifeSettings", Context.MODE_PRIVATE);
-                String customName = prefs.getString("custom_alias", Utils.getDeviceModel());
-                boolean isPublic = prefs.getBoolean("profile_privacy_public", true);
+                    SharedPreferences prefs = context.getSharedPreferences("WifeSettings", Context.MODE_PRIVATE);
+                    String customName = prefs.getString("custom_alias", Utils.getDeviceModel());
+                    boolean isPublic = prefs.getBoolean("profile_privacy_public", true);
 
-                JsonObject json = new JsonObject();
-                json.addProperty("type", type);
-                json.addProperty("sender", Utils.getDeviceId(context));
-                json.addProperty("senderName", customName);
+                    JsonObject json = new JsonObject();
+                    json.addProperty("type", type);
+                    json.addProperty("sender", Utils.getDeviceId(context));
+                    json.addProperty("senderName", customName);
 
-                // Broadcast local profile photo bytes only if privacy settings allow
-                if (isPublic) {
-                    String base64Photo = ProfileImageManager.getLocalProfileImageBase64(context);
-                    if (base64Photo != null && !base64Photo.isEmpty()) {
-                        WifeLogger.log(TAG, "Appending compressed Base64 profile photo bytes to signaling JSON payload.");
-                        json.addProperty("profile_photo", base64Photo);
+                    // Broadcast local profile photo bytes only if privacy settings allow
+                    if (isPublic) {
+                        String base64Photo = ProfileImageManager.getLocalProfileImageBase64(context);
+                        if (base64Photo != null && !base64Photo.isEmpty()) {
+                            WifeLogger.log(TAG, "Appending compressed Base64 profile photo bytes to signaling JSON payload.");
+                            json.addProperty("profile_photo", base64Photo);
+                        } else {
+                            WifeLogger.log(TAG, "Public profile broadcasting is enabled, but no local profile image was discovered.");
+                        }
                     } else {
-                        WifeLogger.log(TAG, "Public profile broadcasting is enabled, but no local profile image was discovered.");
+                        WifeLogger.log(TAG, "Broadcasting profile photo bypassed: User settings configured as PRIVATE.");
                     }
-                } else {
-                    WifeLogger.log(TAG, "Broadcasting profile photo bypassed: User settings configured as PRIVATE.");
+
+                    String payload = json.toString();
+                    WifeLogger.log(TAG, "Transmitting finalized signaling payload block. Action: " + type);
+
+                    pw.println(payload);
+                    pw.flush();
+                    Log.d(TAG, "Sent signal: " + type + " to IP: " + peerIp);
+                    WifeLogger.log(TAG, "Outbound signaling packet successfully written and flushed.");
                 }
-
-                String payload = json.toString();
-                WifeLogger.log(TAG, "Transmitting finalized signaling payload block. Action: " + type);
-
-                pw.println(payload);
-                pw.flush();
-                Log.d(TAG, "Sent signal: " + type + " to IP: " + peerIp);
-                WifeLogger.log(TAG, "Outbound signaling packet successfully written and flushed.");
-
             } catch (Exception e) {
                 Log.e(TAG, "Failed sending signaling packet: " + e.getMessage());
                 WifeLogger.log(TAG, "Failed transmitting outbound control signal " + type + " to IP " + peerIp + " | Exception: " + e.getMessage(), e);
@@ -107,29 +109,30 @@ public class CallSignalingManager {
         WifeLogger.log(TAG, "sendSignal() with timestamp invoked. Queuing outbound control signal: " + type + " | Target IP: " + peerIp + " | Timestamp: " + timestamp);
         executorService.execute(() -> {
             WifeLogger.log(TAG, "Executing outbound signaling socket task on background worker thread.");
-            try (Socket socket = new Socket(peerIp, Constants.OFF_PORT_CONTROL);
-                 OutputStream os = socket.getOutputStream();
-                 PrintWriter pw = new PrintWriter(os, true)) {
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(peerIp, Constants.OFF_PORT_CONTROL), 3000);
+                try (OutputStream os = socket.getOutputStream();
+                     PrintWriter pw = new PrintWriter(os, true)) {
 
-                WifeLogger.log(TAG, "Signaling socket connected successfully with " + peerIp + " on control Port: " + Constants.OFF_PORT_CONTROL);
+                    WifeLogger.log(TAG, "Signaling socket connected successfully with " + peerIp + " on control Port: " + Constants.OFF_PORT_CONTROL);
 
-                SharedPreferences prefs = context.getSharedPreferences("WifeSettings", Context.MODE_PRIVATE);
-                String customName = prefs.getString("custom_alias", Utils.getDeviceModel());
+                    SharedPreferences prefs = context.getSharedPreferences("WifeSettings", Context.MODE_PRIVATE);
+                    String customName = prefs.getString("custom_alias", Utils.getDeviceModel());
 
-                JsonObject json = new JsonObject();
-                json.addProperty("type", type);
-                json.addProperty("sender", Utils.getDeviceId(context));
-                json.addProperty("senderName", customName);
-                json.addProperty("timestamp", timestamp); // Attach the targeted message timestamp
+                    JsonObject json = new JsonObject();
+                    json.addProperty("type", type);
+                    json.addProperty("sender", Utils.getDeviceId(context));
+                    json.addProperty("senderName", customName);
+                    json.addProperty("timestamp", timestamp); // Attach the targeted message timestamp
 
-                String payload = json.toString();
-                WifeLogger.log(TAG, "Transmitting finalized signaling payload block. Action: " + type);
+                    String payload = json.toString();
+                    WifeLogger.log(TAG, "Transmitting finalized signaling payload block. Action: " + type);
 
-                pw.println(payload);
-                pw.flush();
-                Log.d(TAG, "Sent signal: " + type + " with timestamp to IP: " + peerIp);
-                WifeLogger.log(TAG, "Outbound signaling packet with timestamp successfully written and flushed.");
-
+                    pw.println(payload);
+                    pw.flush();
+                    Log.d(TAG, "Sent signal: " + type + " with timestamp to IP: " + peerIp);
+                    WifeLogger.log(TAG, "Outbound signaling packet with timestamp successfully written and flushed.");
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Failed sending signaling packet with timestamp: " + e.getMessage());
                 WifeLogger.log(TAG, "Failed transmitting outbound control signal with timestamp " + type + " to IP " + peerIp + " | Exception: " + e.getMessage(), e);
@@ -155,19 +158,21 @@ public class CallSignalingManager {
                 Gson gson = new Gson();
                 String rosterJson = gson.toJson(syncMap);
                 for (String ip : peerIps) {
-                    try (Socket socket = new Socket(ip, Constants.OFF_PORT_CONTROL);
-                         OutputStream os = socket.getOutputStream();
-                         PrintWriter pw = new PrintWriter(os, true)) {
+                    try (Socket socket = new Socket()) {
+                        socket.connect(new InetSocketAddress(ip, Constants.OFF_PORT_CONTROL), 3000);
+                        try (OutputStream os = socket.getOutputStream();
+                             PrintWriter pw = new PrintWriter(os, true)) {
 
-                        JsonObject json = new JsonObject();
-                        json.addProperty("type", Constants.SIGNAL_PEER_ROSTER_SYNC);
-                        json.addProperty("sender", Utils.getDeviceId(context));
-                        json.addProperty("roster", rosterJson);
+                            JsonObject json = new JsonObject();
+                            json.addProperty("type", Constants.SIGNAL_PEER_ROSTER_SYNC);
+                            json.addProperty("sender", Utils.getDeviceId(context));
+                            json.addProperty("roster", rosterJson);
 
-                        String payload = json.toString();
-                        pw.println(payload);
-                        pw.flush();
-                        Log.d(TAG, "Sent roster sync packet to: " + ip);
+                            String payload = json.toString();
+                            pw.println(payload);
+                            pw.flush();
+                            Log.d(TAG, "Sent roster sync packet to: " + ip);
+                        }
                     } catch (Exception e) {
                         Log.e(TAG, "Failed sending roster sync to " + ip + ": " + e.getMessage());
                     }
