@@ -184,8 +184,12 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
                 WifeLogger.log(TAG, "onConnectionChanged: Link already active. Ignoring server recreation to preserve client sockets.");
             }
         } else {
-            // Delay teardown to prevent transient disconnect signals from dismantling active sockets
-            scheduleTeardownWithDelay();
+            // Symmetrical State Guard: Only schedule teardown if we are currently flagged as connected
+            if (isConnected) {
+                scheduleTeardownWithDelay();
+            } else {
+                WifeLogger.log(TAG, "onConnectionChanged: Link inactive and already marked as disconnected. Ignoring teardown scheduling.");
+            }
         }
         notifyStateChanged();
     }
@@ -256,6 +260,11 @@ public class ConnectionManager implements WiFiDirectManager.ConnectionChangeList
     }
 
     public synchronized void teardown() {
+        // Symmetrical State Guard: Cleanly abort if we are already in a disconnected state to prevent recursive loops
+        if (!isConnected) {
+            WifeLogger.log(TAG, "teardown() bypassed: Already disconnected.");
+            return;
+        }
         WifeLogger.log(TAG, "teardown() invoked. Cleared connection state variables.");
 
         // Cancel any pending scheduled teardowns to avoid double execution
